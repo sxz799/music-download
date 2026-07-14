@@ -1,0 +1,35 @@
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Node modules
+frontend/node_modules/
+frontend/dist/
+
+# Go
+backend/*.exe
+backend/*.exe~
+backend/*.dll
+backend/*.so
+backend/*.dylib
+backend/downloads/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Docker
+Dockerfile
+.dockerignore

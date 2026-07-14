@@ -1,0 +1,37 @@
+
+# Node modules
+node_modules/
+
+# Build outputs
+frontend/dist/
+
+/dist/
+
+# Go binaries
+backend/*.exe
+backend/*.exe~
+backend/*.dll
+backend/*.so
+backend/*.dylib
+music-download
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Downloads
+downloads/
+backend/downloads/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
