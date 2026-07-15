@@ -21,12 +21,11 @@ WORKDIR /app
 ENV CGO_ENABLED=0
 ENV GOOS=linux
 
-# 复制Go依赖文件
-COPY go.mod go.sum ./
-RUN go mod download
 
 # 复制后端源代码
-COPY main.go ./
+COPY ./ ./
+
+RUN go mod download
 
 # 从第一阶段复制构建好的前端资源
 COPY --from=frontend-builder /app/dist ./frontend/dist

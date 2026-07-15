@@ -9,10 +9,7 @@
 // @grant        GM_download
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @connect      other-lv.kuwo.cn
-// @connect      kuwo.cn
-// @connect      localhost
-// @connect      127.0.0.1
+// @connect      *
 // ==/UserScript==
 (function () {
     "use strict";
