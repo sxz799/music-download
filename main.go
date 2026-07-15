@@ -1,9 +1,9 @@
-
 package main
 
 import (
 	"embed"
 	"encoding/json"
+	"html/template"
 	"io/fs"
 	"log"
 	"net/http"
@@ -16,7 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-//go:embed frontend/dist
+//go:embed dist
 var embedFS embed.FS
 
 type Music struct {
@@ -36,11 +36,22 @@ type DownloadTask struct {
 }
 
 var (
-	musicList  []Music
-	taskMap    = make(map[int]*DownloadTask)
-	taskMutex  sync.Mutex
-	nextID     = 1
+	musicList []Music
+	taskMap   = make(map[int]*DownloadTask)
+	taskMutex sync.Mutex
+	nextID    = 1
 )
+
+func RegWebRouter(e *gin.Engine, content embed.FS) {
+	temp := template.Must(template.New("").ParseFS(content, "dist/index.html"))
+	e.SetHTMLTemplate(temp)
+	distFS, _ := fs.Sub(content, "dist")
+	e.StaticFS("/dist", http.FS(distFS))
+	e.NoRoute(func(context *gin.Context) {
+		context.HTML(200, "index.html", "")
+	})
+	log.Println("已开启前后端整合模式！")
+}
 
 func main() {
 	r := gin.Default()
@@ -64,30 +75,7 @@ func main() {
 	r.DELETE("/api/music/:id", deleteMusic)
 	r.POST("/api/download", startDownloadHandler)
 	r.GET("/api/progress", progressSSE)
-
-	// Try to use embed first, if failed use local file system
-	var staticHandler gin.HandlerFunc
-	staticFS, err := fs.Sub(embedFS, "frontend/dist")
-	if err != nil {
-		log.Printf("Embed frontend not found, using local filesystem: %v", err)
-		// Check if local dist exists
-		if _, err := os.Stat("frontend/dist"); os.IsNotExist(err) {
-			log.Printf("Local frontend/dist not found either, serving API only")
-		} else {
-			staticHandler = gin.WrapH(http.FileServer(http.Dir("frontend/dist")))
-		}
-	} else {
-		log.Println("Using embedded frontend")
-		staticHandler = gin.WrapH(http.FileServer(http.FS(staticFS)))
-	}
-
-	// Handle frontend routes with NoRoute
-	if staticHandler != nil {
-		r.NoRoute(func(c *gin.Context) {
-			// If it's not an API route, serve static file
-			staticHandler(c)
-		})
-	}
+	RegWebRouter(r, embedFS)
 
 	log.Println("Server starting on :8080...")
 	r.Run(":8080")
