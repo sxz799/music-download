@@ -22,7 +22,10 @@
             全选
           </label>
           <button v-if="selectedCount > 0" @click="startBatchDownload" class="btn-batch-download" :disabled="isBatchDownloading">
-            {{ isBatchDownloading ? '批量下载中...' : `批量下载 (${selectedCount})` }}
+            {{ batchDownloadBtnText }}
+          </button>
+          <button v-if="selectedCount > 0" @click="batchDelete" class="btn-batch-delete">
+            批量删除 ({{ selectedCount }})
           </button>
           <button v-if="selectedCount > 0" @click="clearSelection" class="btn-clear-selection">
             清除选择
@@ -138,13 +141,15 @@ const selectAll = computed({
   get: () => {
     const pendingSongs = musicList.value.filter(m => 
       m.status === 'pending' || m.status === 'error' || m.status === 'cancelled')
-    return pendingSongs.length > 0 && pendingSongs.every(m => selectedIds.value.includes(m.id))
+    return pendingSongs.length > 0 && pendingSongs.every(m => 
+      selectedIds.value.includes(getNumericId(m.id))
+    )
   },
   set: (value) => {
     if (value) {
       selectedIds.value = musicList.value
         .filter(m => m.status === 'pending' || m.status === 'error' || m.status === 'cancelled')
-        .map(m => m.id)
+        .map(m => getNumericId(m.id))
     } else {
       selectedIds.value = []
     }
@@ -152,6 +157,14 @@ const selectAll = computed({
 })
 
 const selectedCount = computed(() => selectedIds.value.length)
+
+const batchDownloadBtnText = computed(() => {
+  if (isBatchDownloading.value) {
+    return '批量下载中...'
+  } else {
+    return '批量下载 (' + selectedCount.value + ')'
+  }
+})
 
 const loadExample = () => {
   jsonInput.value = JSON.stringify(exampleData, null, 2)
@@ -165,6 +178,13 @@ const clearMessages = () => {
 
 const toggleSelectAll = () => {
   // 计算属性会自动处理
+}
+
+const getNumericId = (id) => {
+  if (typeof id === 'string') {
+    return parseInt(id, 10)
+  }
+  return id
 }
 
 const clearSelection = () => {
@@ -215,6 +235,7 @@ const parseJson = async () => {
     errorMessage.value = 'JSON 解析错误: ' + e.message
   }
 }
+
 
 const addMusicToBackend = async (music) => {
   try {
@@ -316,6 +337,34 @@ const removeMusic = async (id) => {
   }
 }
 
+const batchDelete = async () => {
+  if (selectedIds.value.length === 0) {
+    errorMessage.value = '请先选择要删除的歌曲'
+    return
+  }
+
+  if (!confirm(`确定要删除选中的 ${selectedIds.value.length} 首歌曲吗？`)) {
+    return
+  }
+
+  try {
+    const deletePromises = selectedIds.value.map(id => 
+      fetch(`/api/music/${id}`, { method: 'DELETE' })
+    )
+    await Promise.all(deletePromises)
+
+    musicList.value = musicList.value.filter(m => !selectedIds.value.includes(m.id))
+    selectedIds.value = []
+    successMessage.value = '批量删除成功'
+    setTimeout(() => {
+      successMessage.value = ''
+    }, 2000)
+  } catch (err) {
+    console.error('Error in batch delete:', err)
+    errorMessage.value = '批量删除失败'
+  }
+}
+
 const getStatusClass = (status) => {
   const classes = {
     'pending': 'status-pending',
@@ -344,7 +393,12 @@ const connectProgress = () => {
     
     eventSource.onmessage = (event) => {
       try {
-        musicList.value = JSON.parse(event.data)
+        const data = JSON.parse(event.data)
+        // 确保所有的 id 都是数字类型
+        musicList.value = data.map(item => ({
+          ...item,
+          id: getNumericId(item.id)
+        }))
       } catch (e) {
         console.error('Failed to parse progress data:', e)
         musicList.value = []
@@ -361,7 +415,12 @@ const loadInitialData = async () => {
   try {
     const response = await fetch('/api/music')
     if (response.ok) {
-      musicList.value = await response.json()
+      const data = await response.json()
+      // 确保所有的 id 都是数字类型
+      musicList.value = data.map(item => ({
+        ...item,
+        id: getNumericId(item.id)
+      }))
     }
   } catch (err) {
     console.error('Failed to load initial data:', err)
@@ -463,6 +522,16 @@ h2 {
   background-color: #5D4037;
 }
 
+.btn-batch-delete {
+  background-color: #f44336;
+  padding: 10px 20px;
+  font-size: 14px;
+}
+
+.btn-batch-delete:hover {
+  background-color: #d32f2f;
+}
+
 textarea {
   width: 100%;
   min-height: 200px;
@@ -505,6 +574,14 @@ button:hover {
 
 .btn-secondary:hover {
   background-color: #0b7dda;
+}
+
+.btn-push {
+  background-color: #9C27B0;
+}
+
+.btn-push:hover {
+  background-color: #7B1FA2;
 }
 
 table {

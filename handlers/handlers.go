@@ -5,21 +5,58 @@ import (
 	"log"
 	"music-download/model"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
+type DownloadTask struct {
+	Music  *model.Music
+	Cancel chan bool
+}
+
 var (
 	musicList = make([]model.Music, 0)
-	taskMap   = make(map[int]*model.DownloadTask)
+	taskMap   = make(map[int]*DownloadTask)
 	taskMutex sync.Mutex
 	nextID    = 1
 )
+
+// 清理文件名，移除非法字符并确保有效
+func sanitizeFileName(name string) string {
+	// 替换非法字符
+	illegalChars := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
+	for _, c := range illegalChars {
+		name = strings.ReplaceAll(name, c, "_")
+	}
+	// 移除前后的空格
+	name = strings.TrimSpace(name)
+	// 如果为空，提供默认名称
+	if name == "" {
+		name = "downloaded_file"
+	}
+	return name
+}
+
+// 从URL中提取文件扩展名
+func getExtensionFromURL(urlStr string) string {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return ".flac"
+	}
+	path := u.Path
+	ext := filepath.Ext(path)
+	if ext == "" {
+		return ".flac"
+	}
+	return ext
+}
 
 func GetMusicList(c *gin.Context) {
 	taskMutex.Lock()
@@ -124,16 +161,21 @@ func StartDownloadHandler(c *gin.Context) {
 	}
 
 	if req.FileName != "" {
-		music.FileName = req.FileName
+		music.FileName = sanitizeFileName(req.FileName)
+		if filepath.Ext(music.FileName) == "" {
+			ext := getExtensionFromURL(music.URL)
+			music.FileName += ext
+		}
 	} else {
-		music.FileName = music.Name + filepath.Ext(music.URL)
+		ext := getExtensionFromURL(music.URL)
+		music.FileName = sanitizeFileName(music.Name) + ext
 	}
 
 	music.Status = "downloading"
 	music.Progress = 0
 
 	cancel := make(chan bool)
-	taskMap[req.ID] = &model.DownloadTask{
+	taskMap[req.ID] = &DownloadTask{
 		Music:  music,
 		Cancel: cancel,
 	}
@@ -267,4 +309,140 @@ func ProgressSSE(c *gin.Context) {
 			c.Writer.Flush()
 		}
 	}
+}
+
+// 推送接口：接收音乐数据并直接开始下载
+func PushAndDownload(c *gin.Context) {
+	var input struct {
+		Name     string `json:"name" binding:"required"`
+		URL      string `json:"url" binding:"required"`
+		Time     string `json:"time"`
+		FileName string `json:"fileName"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	log.Printf("Received push request: %v", input)
+	if input.Time == "" {
+		input.Time = time.Now().Format("2006/01/02 15:04:05")
+	}
+
+	// 如果没有提供文件名，生成一个
+	if input.FileName == "" {
+		ext := getExtensionFromURL(input.URL)
+		input.FileName = sanitizeFileName(input.Name) + ext
+	} else {
+		input.FileName = sanitizeFileName(input.FileName)
+		if filepath.Ext(input.FileName) == "" {
+			ext := getExtensionFromURL(input.URL)
+			input.FileName += ext
+		}
+	}
+
+	newMusic := model.Music{
+		Name:       input.Name,
+		URL:        input.URL,
+		Time:       input.Time,
+		FileName:   input.FileName,
+		Downloaded: false,
+		Progress:   0,
+		Status:     "pending",
+	}
+
+	taskMutex.Lock()
+	newMusic.ID = nextID
+	nextID++
+	musicList = append(musicList, newMusic)
+	taskMutex.Unlock()
+
+	// 启动下载
+	cancel := make(chan bool)
+	taskMutex.Lock()
+	taskMap[newMusic.ID] = &DownloadTask{
+		Music:  &musicList[len(musicList)-1],
+		Cancel: cancel,
+	}
+	taskMutex.Unlock()
+
+	go StartDownload(&musicList[len(musicList)-1], cancel)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "音乐已添加并开始下载",
+		"music":   newMusic,
+	})
+}
+
+// 批量推送并下载接口
+func BatchPushAndDownload(c *gin.Context) {
+	var songs []struct {
+		Name     string `json:"name" binding:"required"`
+		URL      string `json:"url" binding:"required"`
+		Time     string `json:"time"`
+		FileName string `json:"fileName"`
+	}
+
+	if err := c.ShouldBindJSON(&songs); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 第一步：先添加所有歌曲到 musicList（一次性扩容，避免指针失效）
+	taskMutex.Lock()
+	startIndex := len(musicList)
+	for _, song := range songs {
+		if song.Time == "" {
+			song.Time = time.Now().Format("2006/01/02 15:04:05")
+		}
+
+		// 处理文件名
+		if song.FileName == "" {
+			ext := getExtensionFromURL(song.URL)
+			song.FileName = sanitizeFileName(song.Name) + ext
+		} else {
+			song.FileName = sanitizeFileName(song.FileName)
+			if filepath.Ext(song.FileName) == "" {
+				ext := getExtensionFromURL(song.URL)
+				song.FileName += ext
+			}
+		}
+
+		newMusic := model.Music{
+			ID:         nextID,
+			Name:       song.Name,
+			URL:        song.URL,
+			Time:       song.Time,
+			FileName:   song.FileName,
+			Downloaded: false,
+			Progress:   0,
+			Status:     "pending",
+		}
+		nextID++
+		musicList = append(musicList, newMusic)
+	}
+	taskMutex.Unlock()
+
+	// 第二步：再启动所有下载（此时切片已经稳定，指针有效）
+	addedMusic := make([]model.Music, 0, len(songs))
+	for i := 0; i < len(songs); i++ {
+		index := startIndex + i
+		taskMutex.Lock()
+		music := &musicList[index]
+		addedMusic = append(addedMusic, *music)
+		cancel := make(chan bool)
+		taskMap[music.ID] = &DownloadTask{
+			Music:  music,
+			Cancel: cancel,
+		}
+		taskMutex.Unlock()
+
+		go StartDownload(music, cancel)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "批量音乐已添加并开始下载",
+		"count":     len(addedMusic),
+		"musicList": addedMusic,
+	})
 }

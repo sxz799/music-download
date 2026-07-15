@@ -10,8 +10,3 @@ type Music struct {
 	Progress   int    `json:"progress"`
 	Status     string `json:"status"`
 }
-
-type DownloadTask struct {
-	Music  *Music
-	Cancel chan bool
-}

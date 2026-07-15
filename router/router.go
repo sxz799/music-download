@@ -14,4 +14,8 @@ func RegisterRouter(r *gin.Engine) {
 	r.DELETE("/api/music/:id", handlers.DeleteMusic)
 	r.POST("/api/download", handlers.StartDownloadHandler)
 	r.GET("/api/progress", handlers.ProgressSSE)
+
+	// 推送接口
+	r.POST("/api/push", handlers.PushAndDownload)
+	r.POST("/api/push/batch", handlers.BatchPushAndDownload)
 }
