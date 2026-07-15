@@ -347,13 +347,12 @@ const connectProgress = () => {
         musicList.value = JSON.parse(event.data)
       } catch (e) {
         console.error('Failed to parse progress data:', e)
+        musicList.value = []
       }
     }
     
     eventSource.onerror = (err) => {
       console.error('EventSource failed:', err)
-      eventSource.close()
-      setTimeout(connectProgress, 3000)
     }
   }
 }

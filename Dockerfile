@@ -47,6 +47,7 @@ COPY --from=backend-builder /app/music-download .
 
 # 创建downloads目录
 RUN mkdir -p /app/downloads
+VOLUME ["/app/downloads"]
 
 # 设置环境变量
 ENV GIN_MODE=release

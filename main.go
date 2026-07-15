@@ -3,20 +3,20 @@ package main
 import (
 	"embed"
 	"encoding/json"
-	"html/template"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-//go:embed dist
+//go:embed frontend/dist
 var embedFS embed.FS
 
 type Music struct {
@@ -36,19 +36,51 @@ type DownloadTask struct {
 }
 
 var (
-	musicList []Music
+	musicList = make([]Music, 0)
 	taskMap   = make(map[int]*DownloadTask)
 	taskMutex sync.Mutex
 	nextID    = 1
 )
 
 func RegWebRouter(e *gin.Engine, content embed.FS) {
-	temp := template.Must(template.New("").ParseFS(content, "dist/index.html"))
-	e.SetHTMLTemplate(temp)
-	distFS, _ := fs.Sub(content, "dist")
-	e.StaticFS("/dist", http.FS(distFS))
+
+	distFS, _ := fs.Sub(content, "frontend/dist")
+	// 静态文件处理
+	e.Use(func(c *gin.Context) {
+
+		path := c.Request.URL.Path
+
+		// API不处理
+		if strings.HasPrefix(path, "/api/") {
+			c.Next()
+			return
+		}
+
+		file, err := fs.Stat(distFS, path[1:])
+
+		if err == nil && !file.IsDir() {
+
+			http.FileServer(
+				http.FS(distFS),
+			).ServeHTTP(c.Writer, c.Request)
+
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	})
 	e.NoRoute(func(context *gin.Context) {
-		context.HTML(200, "index.html", "")
+		index, err := fs.ReadFile(distFS, "index.html")
+		if err != nil {
+			context.String(500, err.Error())
+			return
+		}
+		context.Data(
+			200,
+			"text/html; charset=utf-8",
+			index,
+		)
 	})
 	log.Println("已开启前后端整合模式！")
 }
@@ -67,7 +99,7 @@ func main() {
 		}
 		c.Next()
 	})
-
+	RegWebRouter(r, embedFS)
 	// API routes
 	r.GET("/api/music", getMusicList)
 	r.POST("/api/music", addMusic)
@@ -75,7 +107,6 @@ func main() {
 	r.DELETE("/api/music/:id", deleteMusic)
 	r.POST("/api/download", startDownloadHandler)
 	r.GET("/api/progress", progressSSE)
-	RegWebRouter(r, embedFS)
 
 	log.Println("Server starting on :8080...")
 	r.Run(":8080")
