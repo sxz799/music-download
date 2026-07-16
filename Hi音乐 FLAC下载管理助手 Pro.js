@@ -18,6 +18,243 @@
     let downloading = false;
     let cancelDownload = false;
     const RETRY_TIMES = 2;
+
+    function getToastContainer() {
+        let container = document.querySelector("#flac-toast-container");
+        if (container) return container;
+
+        container = document.createElement("div");
+        container.id = "flac-toast-container";
+        container.style.cssText = `
+            position:fixed;
+            right:16px;
+            bottom:16px;
+            display:flex;
+            flex-direction:column;
+            gap:10px;
+            z-index:100000000;
+            pointer-events:none;
+            max-width:420px;
+        `;
+        document.body.appendChild(container);
+        return container;
+    }
+
+    function showToast(message, type = "info", duration = 2600) {
+        const typeStyleMap = {
+            success: {
+                background: "linear-gradient(135deg, #52c41a 0%, #389e0d 100%)",
+                shadow: "rgba(56, 158, 13, 0.28)"
+            },
+            error: {
+                background: "linear-gradient(135deg, #ff4d4f 0%, #d9363e 100%)",
+                shadow: "rgba(217, 54, 62, 0.28)"
+            },
+            warning: {
+                background: "linear-gradient(135deg, #faad14 0%, #d48806 100%)",
+                shadow: "rgba(212, 136, 6, 0.28)"
+            },
+            info: {
+                background: "linear-gradient(135deg, #1677ff 0%, #0958d9 100%)",
+                shadow: "rgba(9, 88, 217, 0.28)"
+            }
+        };
+        const style = typeStyleMap[type] || typeStyleMap.info;
+        const toast = document.createElement("div");
+        toast.textContent = message;
+        toast.style.cssText = `
+            color:#fff;
+            padding:12px 14px;
+            border-radius:10px;
+            background:${style.background};
+            box-shadow:0 8px 24px ${style.shadow};
+            font-size:13px;
+            line-height:1.5;
+            white-space:pre-wrap;
+            word-break:break-word;
+            opacity:0;
+            transform:translateY(8px);
+            transition:opacity .2s ease, transform .2s ease;
+        `;
+
+        const container = getToastContainer();
+        container.appendChild(toast);
+
+        requestAnimationFrame(() => {
+            toast.style.opacity = "1";
+            toast.style.transform = "translateY(0)";
+        });
+
+        setTimeout(() => {
+            toast.style.opacity = "0";
+            toast.style.transform = "translateY(8px)";
+            setTimeout(() => toast.remove(), 220);
+        }, duration);
+    }
+
+    function closeDialog(dialog, result, resolve) {
+        if (!dialog) return;
+        dialog.style.opacity = "0";
+        const card = dialog.querySelector(".flac-dialog-card");
+        if (card) {
+            card.style.transform = "translateY(8px)";
+        }
+        setTimeout(() => {
+            dialog.remove();
+            resolve(result);
+        }, 180);
+    }
+
+    function openDialog({ title, message, mode = "confirm", defaultValue = "", confirmText = "确定", cancelText = "取消" }) {
+        const existing = document.querySelector("#flac-dialog-overlay");
+        if (existing) existing.remove();
+
+        return new Promise(resolve => {
+            let finished = false;
+            const overlay = document.createElement("div");
+            overlay.id = "flac-dialog-overlay";
+            overlay.style.cssText = `
+                position:fixed;
+                inset:0;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                background:rgba(0,0,0,.35);
+                z-index:100000001;
+                opacity:0;
+                transition:opacity .18s ease;
+            `;
+
+            const card = document.createElement("div");
+            card.className = "flac-dialog-card";
+            card.style.cssText = `
+                width:min(420px, calc(100vw - 32px));
+                background:#fff;
+                border-radius:14px;
+                box-shadow:0 16px 40px rgba(0,0,0,.22);
+                padding:18px;
+                color:#222;
+                transform:translateY(8px);
+                transition:transform .18s ease;
+            `;
+
+            const titleEl = document.createElement("div");
+            titleEl.textContent = title;
+            titleEl.style.cssText = "font-size:16px;font-weight:700;margin-bottom:10px;";
+            card.appendChild(titleEl);
+
+            const messageEl = document.createElement("div");
+            messageEl.textContent = message;
+            messageEl.style.cssText = "font-size:13px;line-height:1.6;color:#555;white-space:pre-wrap;word-break:break-word;";
+            card.appendChild(messageEl);
+
+            let input = null;
+            if (mode === "prompt") {
+                input = document.createElement("input");
+                input.type = "text";
+                input.value = defaultValue;
+                input.style.cssText = `
+                    width:100%;
+                    margin-top:14px;
+                    padding:10px 12px;
+                    border:1px solid #d9d9d9;
+                    border-radius:8px;
+                    outline:none;
+                    font-size:13px;
+                    box-sizing:border-box;
+                `;
+                card.appendChild(input);
+            }
+
+            const actions = document.createElement("div");
+            actions.style.cssText = "display:flex;justify-content:flex-end;gap:10px;margin-top:18px;";
+
+            const cancelBtn = document.createElement("button");
+            cancelBtn.type = "button";
+            cancelBtn.textContent = cancelText;
+            cancelBtn.style.cssText = `
+                height:34px;
+                padding:0 14px;
+                border-radius:8px;
+                border:1px solid #d9d9d9;
+                background:#fff;
+                color:#555;
+                cursor:pointer;
+            `;
+
+            const confirmBtn = document.createElement("button");
+            confirmBtn.type = "button";
+            confirmBtn.textContent = confirmText;
+            confirmBtn.style.cssText = `
+                height:34px;
+                padding:0 14px;
+                border-radius:8px;
+                border:none;
+                background:#1677ff;
+                color:#fff;
+                cursor:pointer;
+            `;
+
+            function finalize(result) {
+                if (finished) return;
+                finished = true;
+                document.removeEventListener("keydown", onKeydown);
+                closeDialog(overlay, result, resolve);
+            }
+
+            function onKeydown(event) {
+                if (!document.body.contains(overlay)) {
+                    document.removeEventListener("keydown", onKeydown);
+                    return;
+                }
+                if (event.key === "Escape") {
+                    event.preventDefault();
+                    finalize(mode === "prompt" ? null : false);
+                    return;
+                }
+                if (event.key === "Enter" && mode === "prompt" && document.activeElement === input) {
+                    event.preventDefault();
+                    finalize(input.value);
+                }
+            }
+
+            cancelBtn.onclick = () => finalize(mode === "prompt" ? null : false);
+            confirmBtn.onclick = () => finalize(mode === "prompt" ? input.value : true);
+
+            actions.appendChild(cancelBtn);
+            actions.appendChild(confirmBtn);
+            card.appendChild(actions);
+            overlay.appendChild(card);
+            document.body.appendChild(overlay);
+
+            overlay.addEventListener("click", event => {
+                if (event.target === overlay) {
+                    finalize(mode === "prompt" ? null : false);
+                }
+            });
+
+            document.addEventListener("keydown", onKeydown);
+
+            requestAnimationFrame(() => {
+                overlay.style.opacity = "1";
+                card.style.transform = "translateY(0)";
+                if (input) {
+                    input.focus();
+                    input.select();
+                } else {
+                    confirmBtn.focus();
+                }
+            });
+        });
+    }
+
+    function showConfirm(message, title = "请确认") {
+        return openDialog({ title, message, mode: "confirm" });
+    }
+
+    function showPrompt(message, defaultValue = "", title = "请输入") {
+        return openDialog({ title, message, mode: "prompt", defaultValue, confirmText: "保存" });
+    }
     
     // 获取服务器地址
     function getServerUrl() {
@@ -30,12 +267,12 @@
     }
     
     // 配置服务器地址
-    function configServer() {
+    async function configServer() {
         const currentUrl = getServerUrl();
-        const newUrl = prompt("请输入音乐下载器服务器地址：", currentUrl);
+        const newUrl = await showPrompt("请输入音乐下载器服务器地址：", currentUrl, "配置远程下载器");
         if (newUrl !== null && newUrl.trim() !== "") {
             setServerUrl(newUrl.trim());
-            alert("服务器地址已保存：" + newUrl.trim());
+            showToast("服务器地址已保存：" + newUrl.trim(), "success");
         }
     }
     
@@ -56,15 +293,15 @@
                 }),
                 onload(res) {
                     if (res.status >= 200 && res.status < 300) {
-                        if (showAlert) alert(`已推送到下载器：${item.name}`);
+                        if (showAlert) showToast(`已推送到下载器：${item.name}`, "success");
                         resolve({ success: true });
                     } else {
-                        if (showAlert) alert(`推送失败：${res.statusText}`);
+                        if (showAlert) showToast(`推送失败：${res.statusText}`, "error", 3600);
                         reject(new Error(res.statusText));
                     }
                 },
                 onerror(err) {
-                    if (showAlert) alert(`推送失败：${err.message}`);
+                    if (showAlert) showToast(`推送失败：${err.message}`, "error", 3600);
                     reject(err);
                 }
             });
@@ -75,11 +312,11 @@
     async function batchPushToDownloader() {
         const list = getRecords();
         if (!list.length) {
-            alert("暂无记录可推送");
+            showToast("暂无记录可推送", "warning");
             return;
         }
         
-        if (!confirm(`确定要推送 ${list.length} 首歌曲到下载器吗？`)) {
+        if (!await showConfirm(`确定要推送 ${list.length} 首歌曲到下载器吗？`, "批量推送确认")) {
             return;
         }
         
@@ -106,9 +343,9 @@
                 });
             });
             
-            alert(`成功推送 ${list.length} 首歌曲到下载器！`);
+            showToast(`成功推送 ${list.length} 首歌曲到下载器！`, "success");
         } catch (err) {
-            alert(`批量推送失败：${err.message}`);
+            showToast(`批量推送失败：${err.message}`, "error", 3600);
         }
     }
 
@@ -125,8 +362,8 @@
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     }
 
-    function clearRecords() {
-        if (!confirm("确定清空所有记录吗？")) return;
+    async function clearRecords() {
+        if (!await showConfirm("确定清空所有记录吗？", "清空记录确认")) return;
         localStorage.removeItem(STORAGE_KEY);
         refreshPanel();
     }
@@ -136,7 +373,7 @@
         const list = getRecords();
 
         if (!list.length) {
-            alert("暂无记录可复制");
+            showToast("暂无记录可复制", "warning");
             return;
         }
 
@@ -145,7 +382,7 @@
 
         try {
             await navigator.clipboard.writeText(dataStr);
-            alert(`已复制 ${list.length} 条记录到剪切板`);
+            showToast(`已复制 ${list.length} 条记录到剪切板`, "success");
         } catch (err) {
             console.error("复制失败:", err);
 
@@ -159,9 +396,9 @@
 
             try {
                 document.execCommand("copy");
-                alert(`已复制 ${list.length} 条记录到剪切板`);
+                showToast(`已复制 ${list.length} 条记录到剪切板`, "success");
             } catch (e) {
-                alert("复制失败，请手动复制");
+                showToast("复制失败，请手动复制", "error", 3600);
             }
 
             textarea.remove();
@@ -272,7 +509,7 @@
     // 批量下载
     async function batchDownload() {
         if (downloading) {
-            if (confirm("正在下载中，是否取消？")) {
+            if (await showConfirm("正在下载中，是否取消？", "取消下载确认")) {
                 cancelDownload = true;
             }
             return;
@@ -280,7 +517,7 @@
 
         let list = getRecords();
         if (!list.length) {
-            alert("暂无记录");
+            showToast("暂无记录", "warning");
             return;
         }
 
@@ -315,9 +552,9 @@
         refreshPanel();
 
         if (failed.length > 0) {
-            alert(`批量下载完成，以下歌曲失败：\n${failed.join("\n")}`);
+            showToast(`批量下载完成，以下歌曲失败：\n${failed.join("\n")}`, "warning", 5200);
         } else {
-            alert("批量下载完成");
+            showToast("批量下载完成", "success");
         }
     }
 
@@ -486,7 +723,7 @@
             const name = nameDom ? nameDom.innerText.replace(/^名称[:：]\s*/, "").trim() : "未知歌曲";
             const link = actions.querySelector("a[href]");
             if (!link) {
-                alert("没有找到下载地址");
+                showToast("没有找到下载地址", "error", 3600);
                 return;
             }
             if (addRecord(name, link.href)) {
@@ -537,7 +774,7 @@
             const name = nameDom ? nameDom.innerText.replace(/^名称[:：]\s*/, "").trim() : "未知歌曲";
             const link = actions.querySelector("a[href]");
             if (!link) {
-                alert("没有找到下载地址");
+                showToast("没有找到下载地址", "error", 3600);
                 return;
             }
             
